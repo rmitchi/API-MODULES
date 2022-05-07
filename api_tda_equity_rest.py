@@ -11,6 +11,7 @@ from datetime import datetime
 # Importing third-party libraries
 import requests
 import pandas as pd						# pip install pandas
+import undetected_chromedriver as uc	# pip install undetected_chromedriver
 import tda								# pip install tda-api
 from tda import auth
 from tda.utils import Utils
@@ -30,6 +31,7 @@ class TDAEquityRESTAPI:
 		self.CREDS = creds
 
 		self.API_KEY = creds['api_key']
+		self.REDIRECT_URI = creds['redirect_uri']
 		self.TOKEN_PATH = "tda_access_token.json"
 
 		self.TIMEZONE = "US/Eastern"
@@ -53,7 +55,8 @@ class TDAEquityRESTAPI:
 		try:
 			self.client = auth.client_from_token_file(token_path=self.TOKEN_PATH, api_key=self.API_KEY)
 		except FileNotFoundError:
-			raise Exception('\nToken not found, Generate a token first\n')
+			driver = uc.Chrome(version_main=99)
+			self.client = auth.client_from_login_flow(driver, self.API_KEY, self.REDIRECT_URI, self.TOKEN_PATH)
 
 	def get_candle_data(self, symbol:str, timeframe:str, period='1d'):
 		"""
