@@ -1,2 +1,15 @@
 # API-MODULES
 API MODULES
+
+# Brokers
+
+## US
+- TDA
+- Tradovate
+
+## CRYPTO
+- BINANCE SPOT
+- BINANCE FUTURES
+
+## INDIAN
+- Zerodha

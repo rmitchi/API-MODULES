@@ -389,11 +389,11 @@ if __name__ == "__main__":
 	api = TradovateEquityRESTAPI(creds=creds)
 	api.connect()
 
-	# Get account info
+	# NOTE Get account info
 	# accountInfo = api.get_account_info()
 	# print(accountInfo)
 
-	# Place order
+	# NOTE Place order
 	# orderId = api.place_order(
 	# 	symbol='ESM2',
 	# 	side='buy',
@@ -403,7 +403,7 @@ if __name__ == "__main__":
 	# 	expireTime=None			# string YYYY-mm-ddTHH:MM:SST (Zulu time, is also UTC time)
 	# )
 
-	# Place oco order
+	# NOTE Place oco order
 	# orderId, ocoId = api.place_oco_order(
 	# 	symbol='ESM2',
 	# 	side='sell',
@@ -412,7 +412,7 @@ if __name__ == "__main__":
 	# 	targetprofit=4205		# targetprofit is in limit price
 	# )
 
-	# Place strategy order
+	# NOTE Place strategy order
 	# strategyId = api.place_strategy_order(
 	# 	symbol='ESM2',
 	# 	side='buy',
@@ -425,11 +425,11 @@ if __name__ == "__main__":
 	# )
 	# print(strategyId)
 
-	# Cancel order
+	# NOTE Cancel order
 	# orderId = 123456
 	# api.cancel_order(orderId)
 
-	# Query order info
+	# NOTE Query order info
 	# orderId = 123456
 	# orderQuery = api.query_order(orderId)
 	# print(orderQuery)

@@ -268,16 +268,16 @@ if __name__ == "__main__":
 	}
 
 	api = TDAOptionsRESTAPI(creds)
-	# api.connect()
+	api.connect()
 
-	# Get candle data
+	# NOTE Get candle data
 	# symbol = "AAPL"
 	# timeframe = "1m"
 	# period = "1d"
 	# df = api.get_candle_data(symbol=symbol, timeframe=timeframe, period=period)
 	# print(df)
 
-	# Get option-chain
-	symbol = "SPY"
-	chain = api.get_options_chain(symbol=symbol)
-	print(chain)
+	# NOTE Get option-chain
+	# symbol = "SPY"
+	# chain = api.get_options_chain(symbol=symbol)
+	# print(chain)

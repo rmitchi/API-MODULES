@@ -73,12 +73,12 @@ if __name__ == "__main__":
 	api = BinanceSPOTAPIREST(creds)
 	api.connect()
 
-	# Get asset balance
-	asset = 'USDT'
-	assetBalance = api.get_asset_balance(asset=asset)
-	print(assetBalance)
+	# NOTE Get asset balance
+	# asset = 'USDT'
+	# assetBalance = api.get_asset_balance(asset=asset)
+	# print(assetBalance)
 
-	# Get candle data
+	# NOTE Get candle data
 	# symbol = 'BTCUSDT'
 	# timeframe = '1m'
 	# df = api.get_candle_data(symbol=symbol, timeframe=timeframe, period='1d')

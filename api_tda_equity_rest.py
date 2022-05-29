@@ -179,9 +179,9 @@ if __name__ == "__main__":
 	}
 
 	api = TDAEquityRESTAPI(creds)
-	# api.connect()
+	api.connect()
 
-	# Get candle data
+	# NOTE Get candle data
 	symbol = "AAPL"
 	timeframe = "1m"
 	period = "1d"
