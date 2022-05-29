@@ -32,7 +32,7 @@ class BinanceSPOTAPIREST:
 		self.client = Client(
 				api_key=self.CREDS['api_key'],
 				api_secret=self.CREDS['api_secret'],
-				testnet=True if self.CREDS.get('testnet') else False
+				testnet=True if self.CREDS['account_type'].lower() in ['testnet','sandbox','demo'] else False
 			)
 
 	def get_asset_balance(self, asset:str='USDT') -> float:

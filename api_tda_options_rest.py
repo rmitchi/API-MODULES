@@ -58,6 +58,15 @@ class TDAOptionsRESTAPI:
 			driver = uc.Chrome(version_main=99)
 			self.client = auth.client_from_login_flow(driver, self.API_KEY, self.REDIRECT_URI, self.TOKEN_PATH)
 
+	def get_tda_options_symbol(self, symbol:str, expiry:str, strike:str, callPut:str) -> str:
+		"""
+		Get TDA Options symbol format\n
+		"""
+		_month, _date = expiry.split('/')
+		year = datetime.now().year
+		ex = f"{int(_month):02d}{int(_date):02d}{str(year)[-2:]}"
+		return f"{symbol}_{ex}{callPut}{int(strike)}"
+
 	def get_candle_data(self, symbol:str, timeframe:str, period='1d'):
 		"""
 		Get realtime candlestick data\n

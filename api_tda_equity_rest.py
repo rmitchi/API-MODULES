@@ -58,7 +58,7 @@ class TDAEquityRESTAPI:
 			driver = uc.Chrome(version_main=99)
 			self.client = auth.client_from_login_flow(driver, self.API_KEY, self.REDIRECT_URI, self.TOKEN_PATH)
 
-	def get_candle_data(self, symbol:str, timeframe:str, period='1d'):
+	def get_candle_data(self, symbol:str, timeframe:str, period='1d') -> pd.DataFrame:
 		"""
 		Get realtime candlestick data\n
 		symbol		: str 	= symbol of the ticker\n
