@@ -1,4 +1,5 @@
 # Author - Karan Parmar
+# Author - Nagavishnu B K
 
 """
 Zerodha REST API
@@ -13,12 +14,16 @@ Zerodha REST API
 """
 
 # Importing built-in libraries
-import os, json, pytz
+import os, json, pytz, time
 from datetime import datetime, date
 
 # Importing third-party libraries
-import requests						# pip install requests
-from kiteconnect import KiteConnect	# pip install kiteconnect
+import requests												# pip install requests
+from kiteconnect import KiteConnect							# pip install kiteconnect
+import undetected_chromedriver as uc 						# pip install undetected_chromedriver
+import pyotp												# pip install pyotp
+from selenium.webdriver.support.ui import WebDriverWait		# pip install selenium
+from selenium.webdriver.common.by import By
 
 class ZerodhaOptionsRESTAPI:
 
@@ -32,22 +37,74 @@ class ZerodhaOptionsRESTAPI:
 	TIMEZONE = "Asia/Kolkata"
 	TOKEN_PATH = "zerodha_token.json"
 
+	_months = ["JAN","FEB","MAR","APR","MAY","JUN","JULY","AUG","SEP","OCT","NOV","DEC"]
+	_chrome_version = 102
+
 	def __init__(self, creds:dict):
 
 		self.CREDS = creds
 
+		self.AUTO_CONNECT = creds.get("auto_connect")
+
 	# Private methods
+	def _auto_generate_access_token(self) -> str:
+		"""
+		Auto generates access token that valid for 12 AM midnight IST\n
+		Requires username, password, totp key for a day, request token changes everytime user requests a token\n
+		Returns str that represents access token\n
+		"""
+		self.client = KiteConnect(api_key=self.CREDS['api_key'])
+		driver = uc.Chrome(version_main = self._chrome_version)
+		driver.get(self.client.login_url())
+
+		# Filling username field
+		login_id = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="userid"]'))
+		login_id.send_keys(self.CREDS['username'])
+
+		# Filling password field
+		pwd = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="password"]'))
+		pwd.send_keys(self.CREDS['password'])
+
+		# Clicking login button
+		submit = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="container"]/div/div/div[2]/form/div[4]/button'))
+		submit.click()
+
+		time.sleep(1)
+
+		# Filling TOTP
+		totp = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="totp"]'))
+		authkey = pyotp.TOTP(self.CREDS['totp_key'])
+		totp.send_keys(authkey.now())
+		
+		# Clicking authorize button
+		continue_btn = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="container"]/div/div/div[2]/form/div[3]/button'))
+		continue_btn.click()
+
+		time.sleep(5)
+
+		# Parsing request token
+		url = driver.current_url
+		initial_token = url.split('request_token=')[1]
+		self.REQUEST_TOKEN = initial_token.split('&')[0]
+
+		driver.close()
+
+		# Fetching access token
+		session = self.client.generate_session(self.REQUEST_TOKEN, self.CREDS['api_secret'])
+		return session['access_token']
+
 	def _generate_access_token(self) -> str:
 		"""
 		Generates access token that valid for 12 AM midnight IST\n
 		Requires a request token for a day, request token changes everytime user requests a token\n
 		Returns str that represents access token\n
 		"""
-		url = self.api.login_url()
+		self.client = KiteConnect(api_key=self.CREDS['api_key'])
+		url = self.client.login_url()
 		print("Generate request token using this url")
 		print(url)
 		self.REQUEST_TOKEN = input("Enter request token : ")
-		session = self.api.generate_session(self.REQUEST_TOKEN, self.CREDS['api_secret'])
+		session = self.client.generate_session(self.REQUEST_TOKEN, self.CREDS['api_secret'])
 		return session['access_token']
 
 	def _read_token(self) ->  dict:
@@ -81,14 +138,27 @@ class ZerodhaOptionsRESTAPI:
 			json.dump(token,f,indent=4)
 			f.close()
 
-	def _get_options_symbol(self, symbol:str, expiry:date, strike_price:int, call_put:str) -> str:
+	def _get_options_symbol(self, symbol:str, expiry:date, strike_price:int, call_put:str, is_monthly_expiry:bool=False) -> str:
 		"""
 		Returns Zerodha options symbol for trading\n
 		NOTE This symbol has been changed 6 times in last 2 years, I don't know why but Zerodha API devs the options symbol\n
 		so, this symbol combination may or may not work in future, so kindly maintain this method\n
 		"""
-		_ex = str(expiry.year)[-2:] + f"{expiry.month:02d}" + str(expiry.day)
+		_year = expiry.year
+		_month = expiry.month
+		_day = expiry.day
 		_cp = "CE" if call_put.lower() == 'call' else "PE"
+
+		# Symbol if expiry is weekly
+		if not is_monthly_expiry:
+			# _ex = str(_year)[-2:] + f"{_month:02d}" + str(_day)					# NIFTY22061616100CE
+			_ex = str(_year)[-2:] + f"{_month}" + str(_day)							# NIFTY2261616100CE
+			# _ex = str(_year)[-2:] + f"{self._months[_month-1]}" + str(_day)		# NIFTY22JUN1616100CE
+		
+		# Symbol if expiry is monthly
+		else:
+			_ex = str(_year[-2:]) + f"{self._months[_month-1]}"						# NIFTY22JUN16100CE
+		
 		options_symbol = f"{symbol.upper()}{_ex}{strike_price}{_cp}"
 		return options_symbol
 
@@ -104,9 +174,18 @@ class ZerodhaOptionsRESTAPI:
 		"""
 		# IF TOKEN NOT EXISTS OR EXPIRED THEN GENERATE A NEW TOKEN
 		if (not os.path.exists(self.TOKEN_PATH)) or self._is_token_expired():
-			token = self._generate_access_token()
-			self._save_token(token)
-			return self.connect()
+			
+			# AUTO CONNECT AND GENERATE ACCESS TOKEN
+			if self.AUTO_CONNECT:
+				token = self._auto_generate_access_token()
+				self._save_token(token)
+				return self.connect()
+			
+			# MANUALLY CONNECT AND GENERATE ACCESS TOKEN
+			else:
+				token = self._generate_access_token()
+				self._save_token(token)
+				return self.connect()
 		
 		else:
 			# IF TOKEN IS NOT EXPIRED THEN USE THE CURRENT TOKEN
@@ -114,10 +193,11 @@ class ZerodhaOptionsRESTAPI:
 			token = self._read_token()
 			self.ACCESS_TOKEN = token['access_token']
 			try:
-				self.client = KiteConnect(self.API_KEY,self.ACCESS_TOKEN)
-				return True
+				self.client = KiteConnect(self.CREDS['api_key'], self.ACCESS_TOKEN)
+				self.client.profile()
+
 			except Exception:
-				return False
+				return self.connect()
 
 	def get_account_info(self) -> dict:
 		"""
@@ -130,7 +210,7 @@ class ZerodhaOptionsRESTAPI:
 		Returns account balance for segment\n
 		segment : str = (default value None) segment of the account. ie. equity, futures, options\n 
 		"""
-		return self.api.margins(segment)['available']['live_balance']
+		return self.client.margins(segment)['available']['live_balance']
 
 	def get_expiries(self, symbol:str) -> list:
 		"""
@@ -161,25 +241,28 @@ class ZerodhaOptionsRESTAPI:
 			quantity:int,
 			order_type:str="MARKET",
 			price:float=None,
+			**options,
 		) -> int:
 		"""
 		Places options order in Zerodha account\n
 		"""
 		
-		options_symbol = self._get_options_symbol()
+		options_symbol = self._get_options_symbol(symbol, expiry, strike_price, call_put, options.get('is_monthly_expiry', False))
+		# print(options_symbol)
 
-		body = {}
-		# 	"variety":options.get('variety',self.api.VARIETY_REGULAR),
-		# 	"exchange":options.get('exchange',self.api.EXCHANGE_NSE),
-		# 	"tradingsymbol":symbol,
-		# 	"transaction_type":side.upper(),
-		# 	"quantity":quantity,
-		# 	"product":options.get('product',self.api.PRODUCT_CNC),
-		# 	"order_type":orderType.upper(),
-		# 	"validity":self.api.VALIDITY_DAY
-		# }
-		# if orderType == 'limit': body['trigger_price'] = limitPrice
-		return self.api.place_order(**body)
+		body = {
+			"variety":options.get('variety',self.client.VARIETY_REGULAR),
+			"exchange":options.get('exchange',self.client.EXCHANGE_NFO),
+			"tradingsymbol":options_symbol,
+			"transaction_type":side.upper(),
+			"quantity":quantity,
+			"product":options.get('product',self.client.PRODUCT_MIS),
+			"order_type":order_type.upper(),
+			"validity":self.client.VALIDITY_DAY
+		}
+		if order_type.lower() == 'limit':
+			body['trigger_price'] = price
+		return self.client.place_order(**body)
 
 	def query_order(self, order_id:int) -> dict:
 		"""
@@ -196,12 +279,12 @@ class ZerodhaOptionsRESTAPI:
 
 if __name__ == "__main__":
 
-	with open("creds_zerodha.json") as f:
+	with open("credentials.json") as f:
 		creds = json.load(f)
 		f.close()
 
 	api = ZerodhaOptionsRESTAPI(creds=creds)
-	# api.connect()
+	api.connect()
 
 	# NOTE Get account info
 	# account_info = api.get_account_info()
@@ -216,8 +299,44 @@ if __name__ == "__main__":
 	# expiries = api.get_expiries(symbol=symbol)
 	# print(expiries)
 
+	# NOTE Get zerodha options symbol
+	# symbol = "NIFTY"
+	# expiry = date(2022,6,16)
+	# strike_price = 16100
+	# call_put = "call"
+	# is_monthly_expiry = False
+	# options_symbol = api._get_options_symbol(
+	# 	symbol=symbol,
+	# 	expiry=expiry,
+	# 	strike_price=strike_price,
+	# 	call_put=call_put,
+	# 	is_monthly_expiry=is_monthly_expiry,
+	# )
+	# print(options_symbol)
+
+	# NOTE Place order
+	# symbol = "NIFTY"
+	# expiry = date(2022,6,16)
+	# strike_price = 16100
+	# call_put = "call"
+	# side = "buy"
+	# quantity = 1
+	# order_type = "MARKET"
+	# price = None
+	# order_id = api.place_order(
+	# 	symbol=symbol,
+	# 	expiry=expiry,
+	# 	strike_price=strike_price,
+	# 	call_put=call_put,
+	# 	side=side,
+	# 	quantity=quantity,
+	# 	order_type=order_type,
+	# 	price=price,
+	# )
+	# print(order_id)
+
 	# NOTE Query order
-	# order_id = 220125003110635
+	# order_id = 151220000000000
 	# query = api.query_order(order_id=order_id)
 	# print(query)
 

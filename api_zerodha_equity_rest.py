@@ -1,4 +1,5 @@
 # Author - Karan Parmar
+# Author - Nagavishnu B K
 
 """
 Zerodha REST API
@@ -12,12 +13,15 @@ Zerodha REST API
 """
 
 # Importing built-in libraries
-import os, json, pytz
-from datetime import datetime, date
+import os, json, pytz, time
+from datetime import datetime
 
 # Importing third-party libraries
-import requests						# pip install requests
-from kiteconnect import KiteConnect	# pip install kiteconnect
+from kiteconnect import KiteConnect							# pip install kiteconnect
+import undetected_chromedriver as uc 						# pip install undetected_chromedriver
+import pyotp												# pip install pyotp
+from selenium.webdriver.support.ui import WebDriverWait		# pip install selenium
+from selenium.webdriver.common.by import By
 
 class ZerodhaEquityRESTAPI:
 
@@ -26,27 +30,77 @@ class ZerodhaEquityRESTAPI:
 	AUTHOR = "Variance Technologies pvt. ltd."
 	EXCHANGE = "SMART"
 	BROKER = "ZERODHA"
-	MARKET = "OPTIONS"
+	MARKET = "EQUITY"
 
 	TIMEZONE = "Asia/Kolkata"
 	TOKEN_PATH = "zerodha_token.json"
+
+	_chrome_version = 102
 
 	def __init__(self, creds:dict):
 
 		self.CREDS = creds
 
-	# Private methods
+		self.AUTO_CONNECT = creds.get("auto_connect")
+
+	def _auto_generate_access_token(self) -> str:
+		"""
+		Auto generates access token that valid for 12 AM midnight IST\n
+		Requires username, password, totp key for a day, request token changes everytime user requests a token\n
+		Returns str that represents access token\n
+		"""
+		self.client = KiteConnect(api_key=self.CREDS['api_key'])
+		driver = uc.Chrome(version_main = self._chrome_version)
+		driver.get(self.client.login_url())
+
+		# Filling username field
+		login_id = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="userid"]'))
+		login_id.send_keys(self.CREDS['username'])
+
+		# Filling password field
+		pwd = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="password"]'))
+		pwd.send_keys(self.CREDS['password'])
+
+		# Clicking login button
+		submit = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="container"]/div/div/div[2]/form/div[4]/button'))
+		submit.click()
+
+		time.sleep(1)
+
+		# Filling TOTP
+		totp = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="totp"]'))
+		authkey = pyotp.TOTP(self.CREDS['totp_key'])
+		totp.send_keys(authkey.now())
+		
+		# Clicking authorize button
+		continue_btn = WebDriverWait(driver, 10).until(lambda x: x.find_element(by=By.XPATH, value='//*[@id="container"]/div/div/div[2]/form/div[3]/button'))
+		continue_btn.click()
+
+		time.sleep(5)
+
+		# Parsing request token
+		url = driver.current_url
+		initial_token = url.split('request_token=')[1]
+		self.REQUEST_TOKEN = initial_token.split('&')[0]
+
+		driver.close()
+
+		# Fetching access token
+		session = self.client.generate_session(self.REQUEST_TOKEN, self.CREDS['api_secret'])
+		return session['access_token']
+
 	def _generate_access_token(self) -> str:
 		"""
 		Generates access token that valid for 12 AM midnight IST\n
 		Requires a request token for a day, request token changes everytime user requests a token\n
 		Returns str that represents access token\n
 		"""
-		url = self.api.login_url()
+		self.client = KiteConnect(api_key=self.CREDS['api_key'])
+		url = self.client.login_url()
 		print("Generate request token using this url")
 		print(url)
 		self.REQUEST_TOKEN = input("Enter request token : ")
-		session = self.api.generate_session(self.REQUEST_TOKEN, self.CREDS['api_secret'])
+		session = self.client.generate_session(self.REQUEST_TOKEN, self.CREDS['api_secret'])
 		return session['access_token']
 
 	def _read_token(self) ->  dict:
@@ -92,9 +146,18 @@ class ZerodhaEquityRESTAPI:
 		"""
 		# IF TOKEN NOT EXISTS OR EXPIRED THEN GENERATE A NEW TOKEN
 		if (not os.path.exists(self.TOKEN_PATH)) or self._is_token_expired():
-			token = self._generate_access_token()
-			self._save_token(token)
-			return self.connect()
+			
+			# AUTO CONNECT AND GENERATE ACCESS TOKEN
+			if self.AUTO_CONNECT:
+				token = self._auto_generate_access_token()
+				self._save_token(token)
+				return self.connect()
+			
+			# MANUALLY CONNECT AND GENERATE ACCESS TOKEN
+			else:
+				token = self._generate_access_token()
+				self._save_token(token)
+				return self.connect()
 		
 		else:
 			# IF TOKEN IS NOT EXPIRED THEN USE THE CURRENT TOKEN
@@ -102,10 +165,11 @@ class ZerodhaEquityRESTAPI:
 			token = self._read_token()
 			self.ACCESS_TOKEN = token['access_token']
 			try:
-				self.client = KiteConnect(self.API_KEY,self.ACCESS_TOKEN)
-				return True
+				self.client = KiteConnect(self.CREDS['api_key'], self.ACCESS_TOKEN)
+				self.client.profile()
+
 			except Exception:
-				return False
+				return self.connect()
 
 	def get_account_info(self) -> dict:
 		"""
@@ -118,7 +182,7 @@ class ZerodhaEquityRESTAPI:
 		Returns account balance for segment\n
 		segment : str = (default value None) segment of the account. ie. equity, futures, options\n 
 		"""
-		return self.api.margins(segment)['available']['live_balance']
+		return self.client.margins(segment)['available']['live_balance']
 
 	def place_order(
 			self, 
@@ -133,18 +197,18 @@ class ZerodhaEquityRESTAPI:
 		Places Equity order in Zerodha account\n
 		"""
 		body = {
-			"variety":options.get('variety',self.api.VARIETY_REGULAR),
-			"exchange":options.get('exchange',self.api.EXCHANGE_NSE),
+			"variety":options.get('variety',self.client.VARIETY_REGULAR),
+			"exchange":options.get('exchange',self.client.EXCHANGE_NSE),
 			"tradingsymbol":symbol,
 			"transaction_type":side.upper(),
 			"quantity":quantity,
-			"product":options.get('product',self.api.PRODUCT_CNC),
+			"product":options.get('product',self.client.PRODUCT_CNC),
 			"order_type":order_type.upper(),
-			"validity":self.api.VALIDITY_DAY
+			"validity":self.client.VALIDITY_DAY
 		}
 		if order_type.lower() == 'limit':
 			body['trigger_price'] = price
-		return self.api.place_order(**body)
+		return self.client.place_order(**body)
 
 	def query_order(self, order_id:int) -> dict:
 		"""
