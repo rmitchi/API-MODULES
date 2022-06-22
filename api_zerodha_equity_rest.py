@@ -137,10 +137,10 @@ class ZerodhaEquityRESTAPI:
 	# Public methods
 	def connect(self) -> None:
 		"""
-		Connect the bot with Zerodha\n
+		Connect the system with Zerodha\n
 		To connect to Zerodha broker, user require an request token, this request token used to generate access token\n
 		Access token is constant during a day and user needs to regenerate after 12PM midnight\n
-		It is advisable to connect the bot with broker before market open\n
+		It is advisable to connect the system with broker before market open\n
 		Returns :\n
 			status of connection with broker\n
 		"""
