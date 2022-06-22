@@ -6,6 +6,7 @@ TD AMERITRADE OPTIONS REST API
 
 # Importing built-in libraries
 import pytz								# pip install pytz
+import datetime as dt
 from datetime import datetime, timedelta
 
 # Importing third-party libraries
@@ -20,22 +21,21 @@ from tda.orders.common import OptionInstruction, OrderStrategyType, OrderType, S
 
 class TDAOptionsRESTAPI:
 
-	ID = "VT_TDA_OPTIONS_API_REST"
-	AUTHOR = "Variance Technologies"
+	ID = "VT_API_REST_TDA_OPTIONS"
+	AUTHOR = "Variance Technologies pvt. ltd."
 	EXCHANGE = "SMART"
 	BROKER = "TDA"
 	MARKET = "OPTIONS"
 
+	TIMEZONE = "US/Eastern"
+	TOKEN_PATH = "tda_access_token.json"
+
+	_chrome_driver_version = 102
+
 	def __init__(self, creds:dict):
 
 		self.CREDS = creds
-
-		self.API_KEY = creds['api_key']
-		self.REDIRECT_URI = creds['redirect_uri']
-		self.TOKEN_PATH = "tda_access_token.json"
-
-		self.TIMEZONE = "US/Eastern"
-
+		
 	# Helper methods
 	@staticmethod
 	def _configure_api_key(key:str):
@@ -47,25 +47,37 @@ class TDAOptionsRESTAPI:
 		else:
 			return key + '@AMER.OAUTHAP'
 
+	@staticmethod
+	def get_tda_options_symbol(symbol:str, expiry:dt.date, strike_price:int, call_put:str) -> str:
+		"""
+		Returns tda options symbol\n
+		"""
+		expiry = f"{int(expiry.month):02d}{int(expiry.day):02d}{str(expiry.year)[-2:]}"
+		call_put = call_put[0].upper()
+		return f"{symbol}_{expiry}{call_put}{int(strike_price)}"
+
 	# Public methdos
 	def connect(self) -> None:
 		"""
 		Connect to TD Ameritrade account\n
 		"""
 		try:
-			self.client = auth.client_from_token_file(token_path=self.TOKEN_PATH, api_key=self.API_KEY)
+			self.client = auth.client_from_token_file(token_path=self.TOKEN_PATH, api_key=self.CREDS['api_key'])
 		except FileNotFoundError:
-			driver = uc.Chrome(version_main=99)
-			self.client = auth.client_from_login_flow(driver, self.API_KEY, self.REDIRECT_URI, self.TOKEN_PATH)
+			driver = uc.Chrome(version_main=self._chrome_driver_version)
+			self.client = auth.client_from_login_flow(driver, self.CREDS['api_key'], self.CREDS['redirect_uri'], self.TOKEN_PATH)
 
-	def get_tda_options_symbol(self, symbol:str, expiry:str, strike:str, callPut:str) -> str:
+	def get_account_info(self) -> dict:
 		"""
-		Get TDA Options symbol format\n
+		Get connected account information\n
 		"""
-		_month, _date = expiry.split('/')
-		year = datetime.now().year
-		ex = f"{int(_month):02d}{int(_date):02d}{str(year)[-2:]}"
-		return f"{symbol}_{ex}{callPut}{int(strike)}"
+		return self.client.get_account(account_id=self.CREDS['account_id'])
+
+	def get_account_balance(self) -> float:
+		"""
+		Get free USD account balance\n
+		"""
+		return
 
 	def get_candle_data(self, symbol:str, timeframe:str, period='1d'):
 		"""
@@ -113,7 +125,7 @@ class TDAOptionsRESTAPI:
 		"""
 		Downloading option chain data from TDA API\n
 		"""
-		url=f"https://api.tdameritrade.com/v1/marketdata/chains"
+		url = f"https://api.tdameritrade.com/v1/marketdata/chains"
 		
 		params = {}
 		params.update({'apikey': self.API_KEY})
@@ -123,87 +135,103 @@ class TDAOptionsRESTAPI:
 		response = requests.get(url, params=params).json()
 		# print(response)
 
-		callExpiriesMap = response['callExpDateMap']
-		putExpiriesMap = response['putExpDateMap']
+		call_expiries_map = response['callExpDateMap']
+		put_expiries_map = response['putExpDateMap']
 
-		_dates = [datetime.strptime(i[:10],"%Y-%m-%d").date() for i in callExpiriesMap]
-		expiryDates = [i for i in callExpiriesMap]
-		# print(expiryDates)
+		_dates = [datetime.strptime(i[:10],"%Y-%m-%d").date() for i in call_expiries_map]
+		expiry_dates = [i for i in call_expiries_map]
+		# print(expiry_dates)
 
 		_maps = {
-			'call':callExpiriesMap,
-			'put':putExpiriesMap,
+			'call':call_expiries_map,
+			'put':put_expiries_map,
 		}
 		if expiry is not None:
 			expiries = [expiry]
 		else:
-			expiries = list(range(len(expiryDates)))
+			expiries = list(range(len(expiry_dates)))
 		
 		chain = {}
 		for expiry in expiries:
-			x = expiryDates[expiry][:10]
+			x = expiry_dates[expiry][:10]
 			chain[x] = {}
-			for strikePrice in callExpiriesMap[expiryDates[expiry]]:
-				chain[x][strikePrice] = {}
+			for strike_price in call_expiries_map[expiry_dates[expiry]]:
+				chain[x][strike_price] = {}
 				for cp, _map in _maps.items():
-					chain[x][strikePrice][cp] = {
-						'symbol':_map[expiryDates[expiry]][strikePrice][0]['symbol'],
-						'ask':_map[expiryDates[expiry]][strikePrice][0]['ask'],
-						'bid':_map[expiryDates[expiry]][strikePrice][0]['bid'],
-						'ltp':_map[expiryDates[expiry]][strikePrice][0]['closePrice'],
+					chain[x][strike_price][cp] = {
+						'symbol':_map[expiry_dates[expiry]][strike_price][0]['symbol'],
+						'ask':_map[expiry_dates[expiry]][strike_price][0]['ask'],
+						'bid':_map[expiry_dates[expiry]][strike_price][0]['bid'],
+						'ltp':_map[expiry_dates[expiry]][strike_price][0]['closePrice'],
 					}
 
 		return chain
 
-	def place_order(self, symbol:str, side:str, quantity:int, orderType:str="MARKET", price:float=None, toOpen:bool=True) -> int:
+	def place_order(
+			self, 
+			symbol:str,
+			expiry:dt.date,
+			strike_price:int,
+			call_put:str,
+			side:str, 
+			quantity:int, 
+			order_type:str="MARKET", 
+			price:float=None, 
+			to_open:bool=True,
+		) -> int:
 		"""
 		Places order in connected account\n
-		symbol		: str	= symbol of the ticker\n
-		side		: str	= side of the order. ie. buy, sell\n
-		quantity	: int 	= no of shares to execute as quantity\n
-		orderType	: str	= order type. ie. MARKET, LIMIT, STOP...\n
-		price		: float	= price to place limit or stop\n
+		symbol		: str		= symbol of the ticker\n
+		expiry 		: dt.date	= expiry date\n
+		strike_price: int		= strike price of the asset\n
+		call_put	: str		= call or put\n
+		side		: str		= side of the order. ie. buy, sell\n
+		quantity	: int 		= no of shares to execute as quantity\n
+		order_type	: str		= order type. ie. MARKET, LIMIT, STOP...\n
+		price		: float		= price to place limit or stop\n
+		to_open		: bool		= To open or close the option positions\n
 		"""
-		orderType = orderType.upper()
+		symbol = self.get_tda_options_symbol(symbol=symbol, expiry=expiry, strike_price=strike_price, call_put=call_put)
+		order_type = order_type.upper()
 
 		if side.lower() == 'buy':
 			
-			if orderType == 'MARKET':
-				if toOpen:
+			if order_type == 'MARKET':
+				if to_open:
 					order = tda.orders.options.option_buy_to_open_market(symbol,quantity)
 				else:
 					order = tda.orders.options.option_buy_to_close_market(symbol,quantity)
 
-			elif orderType == 'LIMIT':
-				if toOpen:
+			elif order_type == 'LIMIT':
+				if to_open:
 					order = tda.orders.options.option_buy_to_open_limit(symbol,quantity,price)
 				else:
 					order = tda.orders.options.option_buy_to_close_limit(symbol,quantity,price)
 			
 		elif side.lower() == 'sell':
 			
-			if orderType == 'MARKET':
-				if toOpen:
+			if order_type == 'MARKET':
+				if to_open:
 					order = tda.orders.options.option_sell_to_open_market(symbol,quantity)
 				else:
 					order = tda.orders.options.option_sell_to_close_market(symbol, quantity)
 
-			elif orderType == 'LIMIT':
-				if toOpen:
+			elif order_type == 'LIMIT':
+				if to_open:
 					order = tda.orders.options.option_sell_to_open_limit(symbol,quantity,price)
 				else:
 					order = tda.orders.options.option_sell_to_close_limit(symbol, quantity, price)
 
-		response = self.client.place_order(self.ACCOUNT_ID,order)
-		return Utils(self.client,self.ACCOUNT_ID).extract_order_id(place_order_response=response)
+		response = self.client.place_order(self.CREDS['account_id'], order)
+		return Utils(self.client, self.CREDS['account_id']).extract_order_id(place_order_response=response)
 
-	def place_trailing_stop(self, symbol:str, side:str, quantity:int, trailOffset:float=10) -> int:
+	def place_trailing_stop(self, symbol:str, side:str, quantity:int, trail_offset:float=10) -> int:
 		"""
 		Places trailing stoploss order\n
 		symbol		: str	= symbol of the ticker\n
 		side		: str	= side of the order. ie. buy, sell\n
 		quantity	: int 	= no of shares to execute as quantity\n
-		trailOffset	: float	= trailing stoploss offset\n
+		trail_offset	: float	= trailing stoploss offset\n
 		"""
 		order = (OrderBuilder()
 					.set_order_type(OrderType.TRAILING_STOP)
@@ -213,62 +241,73 @@ class TDAOptionsRESTAPI:
 					.set_stop_price_link_basis(StopPriceLinkBasis.LAST)
 					.set_order_strategy_type(OrderStrategyType.SINGLE)
 					.set_order_type(OrderType.TRAILING_STOP)
-					.set_stop_price_offset(trailOffset)
+					.set_stop_price_offset(trail_offset)
 				)
-		if side == 'buy':
+		if side.lower() == 'buy':
 			order.add_equity_leg(OptionInstruction.BUY_TO_CLOSE, symbol, quantity)
-		elif side == 'sell':
+		elif side.lower() == 'sell':
 			order.add_equity_leg(OptionInstruction.SELL_TO_CLOSE, symbol, quantity)
 
-		response = self.client.place_order(self.ACCOUNT_ID,order)
-		return Utils(self.client,self.ACCOUNT_ID).extract_order_id(place_order_response=response)
+		response = self.client.place_order(self.CREDS['account_id'], order)
+		return Utils(self.client, self.CREDS['account_id']).extract_order_id(place_order_response=response)
 
-	def place_vertical_spread_order(self, longStrikeSymbol:str, shortStrikeSymbol:str, callPut:str, quantity:int, netCredit:float) -> int:
+	def place_vertical_spread_order(self, long_strike_symbol:str, short_strike_symbol:str, call_put:str, quantity:int, net_credit:float) -> int:
 		"""
 		Places vertical spread order\n
 		"""
-		if callPut == 'call':
+		if call_put == 'call':
 			order = tda.orders.options.bear_call_vertical_open(
-				long_call_symbol=longStrikeSymbol,
-				short_call_symbol=shortStrikeSymbol,
+				long_call_symbol=long_strike_symbol,
+				short_call_symbol=short_strike_symbol,
 				quantity=quantity,
-				net_credit=netCredit
+				net_credit=net_credit
 			)
 		
-		elif callPut == 'put':
+		elif call_put == 'put':
 			order = tda.orders.options.bull_put_vertical_open(
-				long_call_symbol=longStrikeSymbol,
-				short_call_symbol=shortStrikeSymbol,
+				long_call_symbol=long_strike_symbol,
+				short_call_symbol=short_strike_symbol,
 				quantity=quantity,
-				net_credit=netCredit
+				net_credit=net_credit
 			)
 		
-		response = self.client.place_order(self.ACCOUNT_ID,order)
-		return Utils(self.client,self.ACCOUNT_ID).extract_order_id(place_order_response=response)
+		response = self.client.place_order(self.CREDS['account_id'], order)
+		return Utils(self.client, self.CREDS['account_id']).extract_order_id(place_order_response=response)
 
-	def query_order(self, orderId:int):
+	def query_order(self, order_id:int):
 		"""
-		Queries order status by orderId\n
+		Queries order status by order_id\n
 		"""
-		return self.client.get_order(orderId,self.ACCOUNT_ID).json()['status']
+		return self.client.get_order(order_id, self.CREDS['account_id']).json()
 
-	def cancel_order(self,orderId:int):
+	def cancel_order(self,order_id:int):
 		"""
-		Cancels order by orderId\n
+		Cancels order by order_id\n
 		"""
-		self.client.cancel_order(orderId,self.ACCOUNT_ID)
+		try:
+			self.client.cancel_order(order_id, self.CREDS['account_id'])
+		except Exception:
+			pass
 
 
 if __name__ == "__main__":
 
 	creds = {
-		"api_key":"KORNTRADING",
 		"account_id":"",
+		"api_key":"",
 		"redirect_uri":""
 	}
 
 	api = TDAOptionsRESTAPI(creds)
-	api.connect()
+	# api.connect()
+
+	# NOTE Get account info
+	# account_info = api.get_account_info()
+	# print(account_info)
+
+	# NOTE Get account balance
+	# account_balance = api.get_account_balance()
+	# print(account_balance)
 
 	# NOTE Get candle data
 	# symbol = "AAPL"
@@ -281,3 +320,42 @@ if __name__ == "__main__":
 	# symbol = "SPY"
 	# chain = api.get_options_chain(symbol=symbol)
 	# print(chain)
+
+	# NOTE Get TDA options symbol
+	# symbol = "SPY"
+	# expiry = dt.date(2022, 6, 24)
+	# strike_price = 452
+	# call_put = "call"
+	# options_symbol = api.get_tda_options_symbol(symbol=symbol, expiry=expiry, strike_price=strike_price, call_put=call_put)
+	# print(options_symbol)
+
+	# NOTE Place order
+	# symbol = "SPY"
+	# expiry = dt.date(2022, 6, 24)
+	# strike_price = 452
+	# call_put = "call"
+	# side = "buy"
+	# quantity = 1
+	# order_type = "MARKET"
+	# price = None
+	# to_open = True
+	# order_id = api.place_order(
+	# 	symbol=symbol,
+	# 	expiry=expiry,
+	# 	strike_price=strike_price,
+	# 	call_put=call_put,
+	# 	side=side,
+	# 	quantity=quantity,
+	# 	order_type=order_type,
+	# 	price=price,
+	# 	to_open=to_open,
+	# )
+	# print(order_id)
+
+	# NOTE Query order
+	# order_id = 123456
+	# order_info = api.query_order(order_id=order_id)
+
+	# NOTE Cancel order
+	# order_id = 123456
+	# api.cancel_order(order_id=order_id)
