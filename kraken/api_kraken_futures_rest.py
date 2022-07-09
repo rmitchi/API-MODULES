@@ -8,27 +8,26 @@ Kucoin FUTURES REST API
 import json, time, pytz
 from datetime import datetime
 import hmac, base64, hashlib
-from uuid import uuid1
-from urllib.parse import urljoin
+from urllib.parse import urlencode
 
 # Importing third-party libraries
 import pandas as pd					# pip install pandas
 import requests						# pip install requests
 
-class KucoinFuturesAPIREST:
+class KrakenFuturesAPIREST:
 
-	ID = "VT_KUCOIN_FUTURES_API_REST"
+	ID = "VT_KRAKEN_FUTURES_API_REST"
 	AUTHOR = "Variance Technologies"
-	EXCHANGE = "Kucoin"
-	BROKER = "Kucoin"
+	EXCHANGE = "Kraken"
+	BROKER = "Kraken"
 	MARKET = "FUTURES"
 
 	TIMEZONE = "UTC"
 
-	LIVE_ENDPOINT = 'https://api-futures.kucoin.com'
-	SANDBOX_ENDPOINT = 'https://api-sandbox-futures.kucoin.com'
+	LIVE_ENDPOINT = 'https://futures.kraken.com/derivatives'
+	SANDBOX_ENDPOINT = 'https://demo-futures.kraken.com/derivatives'
 
-	is_v1_api = False
+	nonce = 0
 
 	def __init__(self, creds:dict):
 		
@@ -40,79 +39,40 @@ class KucoinFuturesAPIREST:
 			self.url = self.LIVE_ENDPOINT
 
 	# Private methods
-	def _request(self, method, uri, timeout=5, auth=True, params=None):
-		uri_path = uri
-		data_json = ''
-		if method in ['GET', 'DELETE']:
-			if params:
-				strl = []
-				for key in sorted(params):
-					strl.append("{}={}".format(key, params[key]))
-				data_json += '&'.join(strl)
-				uri += '?' + data_json
-				uri_path = uri
-		else:
-			if params:
-				data_json = json.dumps(params)
+	def _get_nonce(self):
+		return int(1000 * time.time())
 
-				uri_path = uri + data_json
+	def _sign_message(self, data:dict, urlpath:str):
 
-		headers = {}
-		if auth:
-			now_time = int(time.time()) * 1000
-			str_to_sign = str(now_time) + method + uri_path
-			sign = base64.b64encode(
-				hmac.new(self.CREDS['api_secret'].encode('utf-8'), str_to_sign.encode('utf-8'), hashlib.sha256).digest())
-			if self.is_v1_api:
-				headers = {
-					"KC-API-SIGN": sign,
-					"KC-API-TIMESTAMP": str(now_time),
-					"KC-API-KEY": self.CREDS['api_key'],
-					"KC-API-PASSPHRASE": self.CREDS['passphrase'],
-					"Content-Type": "application/json"
-				}
-			else:
-				passphrase = base64.b64encode(
-					hmac.new(self.CREDS['api_secret'].encode('utf-8'), self.CREDS['passphrase'].encode('utf-8'), hashlib.sha256).digest())
-				headers = {
-					"KC-API-SIGN": sign,
-					"KC-API-TIMESTAMP": str(now_time),
-					"KC-API-KEY": self.CREDS['api_key'],
-					"KC-API-PASSPHRASE": passphrase,
-					"Content-Type": "application/json",
-					"KC-API-KEY-VERSION": "2"
-				}
-		headers["User-Agent"] = "kucoin-python-sdk/" + '1.0.0' #version
-		url = urljoin(self.url, uri)
+		# step 1: concatenate postData, nonce + endpoint
+		encoded = (urlencode(data) + str(data["nonce"])).encode()
+		message =  hashlib.sha256(encoded).digest() + urlpath.encode()
 
-		if method in ['GET', 'DELETE']:
-			response_data = requests.request(method, url, headers=headers, timeout=timeout)
-		else:
-			response_data = requests.request(method, url, headers=headers, data=data_json, timeout=timeout)
-		return self.check_response_data(response_data)
-	
-	@staticmethod
-	def check_response_data(response_data):
-		if response_data.status_code == 200:
-			try:
-				data = response_data.json()
-			except ValueError:
-				raise Exception(response_data.content)
-			else:
-				if data and data.get('code'):
-					if data.get('code') == '200000':
-						if data.get('data'):
-							return data['data']
-						else:
-							return data
-					else:
-						raise Exception("{}-{}".format(response_data.status_code, response_data.text))
-		else:
-			raise Exception("{}-{}".format(response_data.status_code, response_data.text))
+		signature = hmac.new(base64.b64decode(self.CREDS['private_key']), message, hashlib.sha512)
+		sigdigest = base64.b64encode(signature.digest())
 
-	@property
-	def _return_unique_id(self):
-		return ''.join([each for each in str(uuid1()).split('-')])
+		return sigdigest.decode()
+
+	def _public_request(self, method:str, endpoint:str, params:dict="") -> dict:
+		"""
+		Send a public request to get publically available info\n
+		"""
+		return requests.request(method, self.url + endpoint, params=params).json()
+
+	def _private_request(self, method:str, endpoint:str, data:dict={}) -> dict:
+		"""
+		Send a private request to interact with connected account\n
+		"""
+		data["nonce"] = self._get_nonce()
+
+		sign = self._sign_message(data, endpoint)
+		
+		headers = {
+			"APIKey":self.CREDS['public_key'],
+			"Authent":sign
+		}
+		
+		return requests.request(method, self.url + endpoint, data=data, headers=headers)
 
 	# Public methods
 	def connect(self) -> None:
@@ -126,8 +86,8 @@ class KucoinFuturesAPIREST:
 		Get the account information\n
 		"""
 		method = "GET"
-		endpoint = "/api/v1/account-overview"
-		return self._request(method, endpoint)
+		endpoint = "/api/v3/accounts/"
+		return self._private_request(method, endpoint).json()
 	
 	def get_asset_info(self, asset:str) -> dict:
 		"""
@@ -138,8 +98,13 @@ class KucoinFuturesAPIREST:
 			Information about the asset including the precisions, base and quotes, fees
 		"""
 		method = "GET"
-		endpoint = f"/api/v1/contracts/{asset}"
-		return self._request(method, endpoint)
+		endpoint = f"/api/v3/instruments"
+		all_markets = self._public_request(method, endpoint)['instruments']
+
+		for market in all_markets:
+			if market['type'] == "flexible_futures":
+				if market['symbol'] == 'pf_' + asset.lower().replace('_','').replace('-',''):
+					return market
 
 	def get_account_balance(self, asset:str) -> float:
 		"""
@@ -239,18 +204,17 @@ class KucoinFuturesAPIREST:
 if __name__ == "__main__":
 
 	creds = {
-		"api_key":"6295b80541a5330001d17878",
-		"api_secret":"03de75f3-ec16-453c-a688-73c6dee79ef2",
-		"passphrase":"dummyapi",
+		"public_key":"glT+JjLLKuo6Z6hhtW7f/v9SgWMx3sRTitumeo4hlGVXzC03lMjVqe/q",
+		"private_key":"VJZIMIlc5g/gGNFIFuAT01+jVpvJvJNHeOsngBeed+mVYUUdqcYz8See51QrdNZXHegMGxQLkXzskz30fAW6oZwf",
 		"account_type":"demo"
 	}
 
-	api = KucoinFuturesAPIREST(creds=creds)
+	api = KrakenFuturesAPIREST(creds=creds)
 	api.connect()
 
 	# NOTE Get account info
-	# account_info = api.get_account_info()
-	# print(account_info)
+	account_info = api.get_account_info()
+	print(account_info)
 
 	# NOTE Get asset balance
 	# asset = "USDT"
@@ -258,7 +222,7 @@ if __name__ == "__main__":
 	# print(asset_balance)
 
 	# NOTE Get asset info
-	# asset = "XBTUSDTM"
+	# asset = "XBTUSD"
 	# asset_info = api.get_asset_info(asset=asset)
 	# print(asset_info)
 

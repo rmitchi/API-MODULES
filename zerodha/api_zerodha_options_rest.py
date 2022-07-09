@@ -46,6 +46,15 @@ class ZerodhaOptionsRESTAPI:
 
 		self.AUTO_CONNECT = creds.get("auto_connect")
 
+	# Helper methods
+	@staticmethod
+	def _parse_request_token(url:str) -> str:
+		"""
+		Get the request token from the redirect url\n
+		"""
+		initial_token = url.split('request_token=')[1]
+		return initial_token.split('&')[0]
+
 	# Private methods
 	def _auto_generate_access_token(self) -> str:
 		"""
@@ -83,9 +92,7 @@ class ZerodhaOptionsRESTAPI:
 		time.sleep(5)
 
 		# Parsing request token
-		url = driver.current_url
-		initial_token = url.split('request_token=')[1]
-		self.REQUEST_TOKEN = initial_token.split('&')[0]
+		self.REQUEST_TOKEN = self._parse_request_token(url=driver.current_url)
 
 		driver.close()
 
@@ -141,7 +148,7 @@ class ZerodhaOptionsRESTAPI:
 	def _get_options_symbol(self, symbol:str, expiry:date, strike_price:int, call_put:str, is_monthly_expiry:bool=False) -> str:
 		"""
 		Returns Zerodha options symbol for trading\n
-		NOTE This symbol has been changed 6 times in last 2 years, I don't know why but Zerodha API devs the options symbol\n
+		NOTE This symbol has been changed 6 times in last 2 years, I don't know why but Zerodha API devs changes the options symbol\n
 		so, this symbol combination may or may not work in future, so kindly maintain this method\n
 		"""
 		_year = expiry.year
@@ -151,13 +158,15 @@ class ZerodhaOptionsRESTAPI:
 
 		# Symbol if expiry is weekly
 		if not is_monthly_expiry:
-			# _ex = str(_year)[-2:] + f"{_month:02d}" + str(_day)					# NIFTY22061616100CE
-			_ex = str(_year)[-2:] + f"{_month}" + str(_day)							# NIFTY2261616100CE
-			# _ex = str(_year)[-2:] + f"{self._months[_month-1]}" + str(_day)		# NIFTY22JUN1616100CE
+			# _ex = str(_year)[-2:] + f"{_month:02d}" + str(_day)					# NIFTY2207716100CE
+			#  = str(_year)[-2:] + f"{_month}" + str(_day)							# NIFTY227716100CE
+			_ex = str(_year)[-2:] + f"{_month}" + f"{_day:02d}"						# NIFTY2270716100CE
+			# _ex = str(_year)[-2:] + f"{self._months[_month-1]}" + str(_day)		# NIFTY22JUL716100CE
+			# _ex = str(_year)[-2:] + f"{self._months[_month-1]}" + f"{_day:02d}"	# NIFTY22JUL0716100CE
 		
 		# Symbol if expiry is monthly
 		else:
-			_ex = str(_year[-2:]) + f"{self._months[_month-1]}"						# NIFTY22JUN16100CE
+			_ex = str(_year)[-2:] + f"{self._months[_month-1]}"						# NIFTY22JUL16100CE
 		
 		options_symbol = f"{symbol.upper()}{_ex}{strike_price}{_cp}"
 		return options_symbol
@@ -165,10 +174,10 @@ class ZerodhaOptionsRESTAPI:
 	# Public methods
 	def connect(self) -> None:
 		"""
-		Connect the system with Zerodha\n
+		Connect the bot with Zerodha\n
 		To connect to Zerodha broker, user require an request token, this request token used to generate access token\n
 		Access token is constant during a day and user needs to regenerate after 12PM midnight\n
-		It is advisable to connect the system with broker before market open\n
+		It is advisable to connect the bot with broker before market open\n
 		Returns :\n
 			status of connection with broker\n
 		"""
@@ -197,6 +206,7 @@ class ZerodhaOptionsRESTAPI:
 				self.client.profile()
 
 			except Exception:
+				os.remove(self.TOKEN_PATH)
 				return self.connect()
 
 	def get_account_info(self) -> dict:
@@ -248,7 +258,7 @@ class ZerodhaOptionsRESTAPI:
 		"""
 		
 		options_symbol = self._get_options_symbol(symbol, expiry, strike_price, call_put, options.get('is_monthly_expiry', False))
-		# print(options_symbol)
+		print(options_symbol)
 
 		body = {
 			"variety":options.get('variety',self.client.VARIETY_REGULAR),
@@ -289,7 +299,7 @@ if __name__ == "__main__":
 	# NOTE Get account info
 	# account_info = api.get_account_info()
 	# print(account_info)
-	
+
 	# NOTE Get account balance
 	# balance = api.get_account_balance('equity')
 	# print(balance)
@@ -336,7 +346,7 @@ if __name__ == "__main__":
 	# print(order_id)
 
 	# NOTE Query order
-	# order_id = 151220000000000
+	# order_id = 220616400872056
 	# query = api.query_order(order_id=order_id)
 	# print(query)
 

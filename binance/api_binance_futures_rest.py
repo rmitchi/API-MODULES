@@ -32,10 +32,10 @@ class BinanceFuturesAPIREST:
 		self.client = Client(
 			api_key=self.CREDS['api_key'],
 			api_secret=self.CREDS['api_secret'],
-			testnet=self.CREDS['account_type'].lower() in ['testnet','sandbox','demo'],
+			testnet=self.CREDS['account_type'].lower() in ['testnet','sandbox','test','demo'],
 		)
 
-	def get_account(self) -> dict:
+	def get_account_info(self) -> dict:
 		"""
 		Get connected account info\n
 		"""
@@ -54,15 +54,10 @@ class BinanceFuturesAPIREST:
 		"""
 		Get connected aaccount's free asset balance\n
 		"""
-		count = 0
-		while count < 5:
-			try:
-				for i in self.client.futures_account_balance():
-					if i['asset'] == asset.upper():
-						return float(i['withdrawAvailable'])
-			except Exception as e:
-				count += 1
-
+		for i in self.client.futures_account_balance():
+			if i['asset'] == asset.upper():
+				return float(i['withdrawAvailable'])
+		
 	def get_candle_data(self, symbol:str, timeframe:str, period:str='1d') -> pd.DataFrame:
 		"""
 		Returns historcal klines from past for given symbol and interval\n
@@ -84,52 +79,71 @@ class BinanceFuturesAPIREST:
 		df.index.name = 'datetime'
 		return df
 
-	def place_order(self, symbol:str, side:str, quantity:float, orderType:str="MARKET", price:float=None) -> int:
+	def place_order(self, symbol:str, side:str, quantity:float, order_type:str="MARKET", price:float=None, to_open:bool=True) -> str:
 		"""
+		Places order in connected account\n
+		Params:
+			symbol		:	str		=	symbol of the ticker
+			side		:	str		=	side of the order. ie. buy or sell
+			quantity	:	float	=	quantity of the asset to trade
+			order_type	:	str		=	type of the order to execute trade. ie. MARKET, LIMIT, STOP ...
+			price		:	float	=	price for the order. default None. combines with LIMIT or STOP order
+			to_open		:	bool	=	to open a position or close. True means open a position, False to close an open position
 		
+		Returns:
+			order id will be returned if order executed successfully
 		"""
-		_positionSide = {
-			"buy":"LONG",
-			"sell":"SHORT"
-		}
-		_exitSide = {
-			"buy":"SELL",
-			"sell":"BUY"
-		}
-		
-		# Setting hedge mode to open positions
+		# Setting hedge mode to open and close positions
 		positionMode = self.client.futures_get_position_mode()['dualSidePosition']
 		(not positionMode) and self.client.futures_change_position_mode(dualSidePosition=True)
-		self.set_leverage(symbol=symbol, leverage=1)
 		
 		# NOTE Placing entry order
 		body = {
 			"symbol":symbol,
 			"side":side.upper(),
-			"positionSide":_positionSide[side],
+			"positionSide":"LONG" if side.lower() == 'buy' else "SHORT",
 			"quantity":quantity,
-			"type":orderType.upper()
+			"type":order_type.upper()
 		}
+
+		if order_type.lower() == "limit":
+			body['price'] = price
+			body['timeInForce'] = "GTC"
+
+		if not to_open:
+			body['positionSide'] = "LONG" if side.lower() == 'sell' else "SHORT"
+			body['closePosition'] = True
+			body['reduceOnly'] = True
+			del body['quantity']
+
 		return self.client.futures_create_order(**body)['orderId']
 
 	def set_leverage(self, symbol:str, leverage:int) -> None:
 		"""
 		Sets leverage\n
+		Params:
+			symbol		:	str		=	Symbol of the ticker
+			leverage	: 	int		=	Leverage to set
 		"""
 		self.client.futures_change_leverage(symbol=symbol, leverage=leverage)
 
-	def cancel_order(self, symbol:str, orderId:int) -> None:
+	def cancel_order(self, symbol:str, order_id:int) -> None:
 		"""
 		Cancel the order\n
+		Params:
+			symbol		:	str		=	order ticker symbol
+			order_id	:	str		=	order id to cancel
 		"""
-		self.client.futures_cancel_order(symbol=symbol, orderId=orderId)
-		return
+		self.client.futures_cancel_order(symbol=symbol, orderId=order_id)
 
-	def query_order(self, symbol:str, orderId:str) -> dict:
+	def query_order(self, symbol:str, order_id:str) -> dict:
 		"""
 		Query order\n
+		Params:
+			symbol		:	str		=	order ticker symbol
+			order_id	:	str		=	order id to query
 		"""
-		return self.client.futures_get_order(symbol=symbol, orderId=orderId)
+		return self.client.futures_get_order(symbol=symbol, orderId=order_id)
 
 if __name__ == "__main__":
 
