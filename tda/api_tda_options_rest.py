@@ -51,6 +51,10 @@ class TDAOptionsRESTAPI:
 	def get_tda_options_symbol(symbol:str, expiry:dt.date, strike_price:int, call_put:str) -> str:
 		"""
 		Returns tda options symbol\n
+		symbol		: str		= symbol of the underlying asset\n
+		expiry 		: dt.date	= expiry date\n
+		strike_price: int		= strike price of the asset\n
+		call_put	: str		= call or put\n
 		"""
 		expiry = f"{int(expiry.month):02d}{int(expiry.day):02d}{str(expiry.year)[-2:]}"
 		call_put = call_put[0].upper()
@@ -170,9 +174,6 @@ class TDAOptionsRESTAPI:
 	def place_order(
 			self, 
 			symbol:str,
-			expiry:dt.date,
-			strike_price:int,
-			call_put:str,
 			side:str, 
 			quantity:int, 
 			order_type:str="MARKET", 
@@ -182,16 +183,12 @@ class TDAOptionsRESTAPI:
 		"""
 		Places order in connected account\n
 		symbol		: str		= symbol of the ticker\n
-		expiry 		: dt.date	= expiry date\n
-		strike_price: int		= strike price of the asset\n
-		call_put	: str		= call or put\n
 		side		: str		= side of the order. ie. buy, sell\n
 		quantity	: int 		= no of shares to execute as quantity\n
 		order_type	: str		= order type. ie. MARKET, LIMIT, STOP...\n
 		price		: float		= price to place limit or stop\n
 		to_open		: bool		= To open or close the option positions\n
 		"""
-		symbol = self.get_tda_options_symbol(symbol=symbol, expiry=expiry, strike_price=strike_price, call_put=call_put)
 		order_type = order_type.upper()
 
 		if side.lower() == 'buy':

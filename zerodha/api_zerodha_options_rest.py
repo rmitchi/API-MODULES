@@ -145,7 +145,7 @@ class ZerodhaOptionsRESTAPI:
 			json.dump(token,f,indent=4)
 			f.close()
 
-	def _get_options_symbol(self, symbol:str, expiry:date, strike_price:int, call_put:str, is_monthly_expiry:bool=False) -> str:
+	def get_options_symbol(self, symbol:str, expiry:date, strike_price:int, call_put:str, is_monthly_expiry:bool=False) -> str:
 		"""
 		Returns Zerodha options symbol for trading\n
 		NOTE This symbol has been changed 6 times in last 2 years, I don't know why but Zerodha API devs changes the options symbol\n
@@ -224,7 +224,7 @@ class ZerodhaOptionsRESTAPI:
 
 	def get_expiries(self, symbol:str) -> list:
 		"""
-		Get expiries for a symbol\n
+		Get expiries for a symbol from NSE website API\n
 		"""
 		url = "https://www.nseindia.com/api/option-chain-indices"
 
@@ -239,14 +239,14 @@ class ZerodhaOptionsRESTAPI:
 		}
 
 		expiries = requests.get(url, params=params, headers=headers).json()['records']['expiryDates']
-		return [datetime.strptime(i, "%d-%b-%Y").date() for i in expiries]
+		current_date = datetime.now(pytz.timezone(self.TIMEZONE))
+		# NOTE Sometimes NSE does not update the expiries
+		# So if we fetch the expiries, we will also get the expired one, This snippet filter only if expiry date is today or after today's date
+		return [x for x in [datetime.strptime(i, "%d-%b-%Y").date() for i in expiries] if x >= current_date.date()]
 	
 	def place_order(
 			self, 
 			symbol:str,
-			expiry:date,
-			strike_price:int,
-			call_put:str,
 			side:str,
 			quantity:int,
 			order_type:str="MARKET",
@@ -255,15 +255,17 @@ class ZerodhaOptionsRESTAPI:
 		) -> int:
 		"""
 		Places options order in Zerodha account\n
+		symbol		: str		= symbol of the ticker\n
+		side		: str		= side of the order. ie. buy, sell\n
+		quantity	: int 		= no of contracts to execute as quantity\n
+		order_type	: str		= order type. ie. MARKET, LIMIT, STOP...\n
+		price		: float		= price to place limit or stop\n
+		to_open		: bool		= To open or close the option positions\n
 		"""
-		
-		options_symbol = self._get_options_symbol(symbol, expiry, strike_price, call_put, options.get('is_monthly_expiry', False))
-		print(options_symbol)
-
 		body = {
 			"variety":options.get('variety',self.client.VARIETY_REGULAR),
 			"exchange":options.get('exchange',self.client.EXCHANGE_NFO),
-			"tradingsymbol":options_symbol,
+			"tradingsymbol":symbol,
 			"transaction_type":side.upper(),
 			"quantity":quantity,
 			"product":options.get('product',self.client.PRODUCT_MIS),
@@ -315,7 +317,7 @@ if __name__ == "__main__":
 	# strike_price = 16100
 	# call_put = "call"
 	# is_monthly_expiry = False
-	# options_symbol = api._get_options_symbol(
+	# options_symbol = api.get_options_symbol(
 	# 	symbol=symbol,
 	# 	expiry=expiry,
 	# 	strike_price=strike_price,
