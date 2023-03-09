@@ -152,7 +152,7 @@ class TradovateAuth:
 class TradovateEquityRESTAPI(TradovateAuth):
 
 	ID = "VT_TRADOVATE_EQUITY_API_REST"
-	AUTHOR = "Variance Technologies"
+	AUTHOR = "Variance Technologies pvt. ltd."
 	EXCHANGE = "SMART"
 	BROKER = "TRADOVATE"
 	MARKET = "FUTURES"
@@ -169,6 +169,15 @@ class TradovateEquityRESTAPI(TradovateAuth):
 		Connect to Tradovate equity account\n
 		"""
 		self.login()
+
+	def get_contract_id(self, symbol:str) -> int:
+		"""
+		Returns tradovate id for the contract\n
+		"""
+		endpoint = self._get_endpoint() + '/contract/find'
+		params = {'name':symbol}
+		response = requests.get(endpoint, params=params, headers=self._get_headers())
+		return response.json()['id']
 
 	def get_account_info(self) -> dict:
 		"""
@@ -195,7 +204,7 @@ class TradovateEquityRESTAPI(TradovateAuth):
 			symbol:str, 
 			side:str, 
 			quantity:int, 
-			orderType:str='MARKET', 
+			order_type:str='MARKET', 
 			price:float=None,
 			**options
 		) -> int:
@@ -205,8 +214,8 @@ class TradovateEquityRESTAPI(TradovateAuth):
 			symbol : str = symbol of the ticker
 			side : str = side of the order execution
 			quantity : int = quantity to trade
-			limitPrice : float = limit price to set limit order (only for limit order)
-			orderType : str = type of order (default market)
+			limit_price : float = limit price to set limit order (only for limit order)
+			order_type : str = type of order (default market)
 			\n
 		Returns:
 			orderId : int = id of the order
@@ -217,22 +226,21 @@ class TradovateEquityRESTAPI(TradovateAuth):
 			"action": side.title(),
 			"symbol": symbol.upper(),
 			"orderQty": int(quantity),
-			"orderType": orderType.title(),
+			"orderType": order_type.title(),
 			"isAutomated": True 
 		}
-		if orderType.lower() == 'limit': 
+		if order_type.lower() == 'limit': 
 			body['price'] = price
 			if options.get('expirationTime'):
 				body['timeInForce'] = 'GTD'
 				body['expireTime'] = options['expireTime']
 
-		if orderType.lower() == 'stop': 
+		if order_type.lower() == 'stop': 
 			body['stopPrice'] = price
 			body['timeInForce'] = 'Day'
 		
 		endpoint = self._get_endpoint() + '/order/placeorder/'
-		response = requests.post(endpoint,json=body,headers=self._get_headers()).json()
-		print(response.json())
+		response = requests.post(endpoint, json=body, headers=self._get_headers()).json()
 		return response.json()['orderId']
 		
 	def place_oco_order(
@@ -253,7 +261,7 @@ class TradovateEquityRESTAPI(TradovateAuth):
 			profitTarget : float = profittarget absolute price for the symbol
 			\n
 		Returns:
-			stoplossId, takeprofitId : tuple = id of stoploss and takeprofit according will be returned
+			stoploss_id, takeprofit_id : tuple = id of stoploss and takeprofit according will be returned
 		"""
 		oco = {
 			"action":side.title(),
@@ -274,17 +282,17 @@ class TradovateEquityRESTAPI(TradovateAuth):
 		}
 
 		endpoint = self._get_endpoint() + '/order/placeoco'
-		response = requests.post(endpoint,json=body,headers=self._get_headers()).json()
-		slId, tpId = response['orderId'], response.json()['ocoId']
-		return slId, tpId
+		response = requests.post(endpoint, json=body, headers=self._get_headers()).json()
+		sl_id, tp_id = response['orderId'], response.json()['ocoId']
+		return sl_id, tp_id
 
 	def place_strategy_order(
 			self, 
 			symbol:str, 
 			side:str, 
 			quantity:int, 
-			orderType:str="MARKET", 
-			limitPrice:float=None, 
+			order_type:str="MARKET", 
+			limit_price:float=None, 
 			stoploss:float=None, 
 			targetprofit:float=None, 
 			**options
@@ -295,7 +303,7 @@ class TradovateEquityRESTAPI(TradovateAuth):
 		params = {
 			"entryVersion":{
 				"orderQty":1,
-				"orderType":orderType.title()
+				"orderType":order_type.title()
 			},
 			"brackets":[
 				{
@@ -307,8 +315,8 @@ class TradovateEquityRESTAPI(TradovateAuth):
 			]
 		}
 
-		if orderType.upper() == "LIMIT":
-			params['entryVersion']['price'] = limitPrice
+		if order_type.upper() == "LIMIT":
+			params['entryVersion']['price'] = limit_price
 			if options.get('expireTime'):
 				params['entryVersion']['timeInForce'] = 'GTD'
 				params['entryVersion']['expireTime'] = options['expireTime']
@@ -336,7 +344,7 @@ class TradovateEquityRESTAPI(TradovateAuth):
 
 		return
 
-	def cancel_order(self, orderId:int) -> tuple[bool, str]:
+	def cancel_order(self, order_id:int) -> tuple[bool, str]:
 		"""
 		Cancels order by orderId\n
 		Arguments:
@@ -344,16 +352,16 @@ class TradovateEquityRESTAPI(TradovateAuth):
 		"""
 		try:
 			body = {
-				"orderId":orderId,
+				"orderId":order_id,
 				"isAutomated":True
 			}
 
 			endpoint = self._get_endpoint() + '/order/cancelorder'
-			response = requests.post(endpoint,json=body,headers=self._get_headers())
+			response = requests.post(endpoint, json=body, headers=self._get_headers())
 			try:
-				cancelDetatils = response.json()
-				cancelStatus = False if ('failureReason' in cancelDetatils) else True
-				return cancelStatus, cancelDetatils
+				cancel_detatils = response.json()
+				cancel_status = False if ('failureReason' in cancel_detatils) else True
+				return cancel_status, cancel_detatils
 
 			except Exception:
 				return False, 'tooLate'
@@ -361,7 +369,7 @@ class TradovateEquityRESTAPI(TradovateAuth):
 		except Exception as e:
 			raise Exception(f"exception in cancelling order : {e}")
 
-	def query_order(self, orderId:int) -> dict:
+	def query_order(self, order_id:int) -> dict:
 		"""
 		Queries order by orderId\n
 		Arguments:
@@ -372,9 +380,7 @@ class TradovateEquityRESTAPI(TradovateAuth):
 		"""
 		try:
 			endpoint = self._get_endpoint() + '/order/item'
-			params = {
-				'id':orderId,
-			}
+			params = {'id':order_id}
 			return requests.get(endpoint, params=params, headers=self._get_headers()).json()
 
 		except Exception as e:
@@ -390,15 +396,20 @@ if __name__ == "__main__":
 	api.connect()
 
 	# NOTE Get account info
-	# accountInfo = api.get_account_info()
-	# print(accountInfo)
+	# account_info = api.get_account_info()
+	# print(account_info)
+
+	# NOTE Get contract id
+	# symbol = "ESU2"
+	# contract_id = api.get_contract_id(symbol=symbol)
+	# print(contract_id)
 
 	# NOTE Place order
-	# orderId = api.place_order(
+	# order_id = api.place_order(
 	# 	symbol='ESM2',
 	# 	side='buy',
 	# 	quantity=1,
-	# 	orderType="MARKET",
+	# 	order_type="MARKET",
 	# 	price=None,
 	# 	expireTime=None			# string YYYY-mm-ddTHH:MM:SST (Zulu time, is also UTC time)
 	# )
@@ -417,19 +428,19 @@ if __name__ == "__main__":
 	# 	symbol='ESM2',
 	# 	side='buy',
 	# 	quantity=1,
-	# 	orderType='MARKET',
+	# 	order_type='MARKET',
 	# 	limitPrice=4000,
 	# 	stoploss=3,				# stoploss is in points
 	# 	targetprofit=1,			# targetprofit is in point
 	# 	expireTime=None			# string YYYY-mm-ddTHH:MM:SST (Zulu time, is also UTC time)
 	# )
-	# print(strategyId)
+	# print(strategy_id)
 
 	# NOTE Cancel order
-	# orderId = 123456
-	# api.cancel_order(orderId)
+	# order_id = 123456
+	# api.cancel_order(order_id)
 
 	# NOTE Query order info
-	# orderId = 123456
-	# orderQuery = api.query_order(orderId)
-	# print(orderQuery)
+	# order_id = 123456
+	# order_query = api.query_order(order_id)
+	# print(order_query)

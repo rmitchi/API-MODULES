@@ -166,6 +166,8 @@ class TradovateClient:
 	_is_connected = False
 	_can_disconnect = False
 
+	_id_vs_symbol = {}
+
 	def _create_websocket_app(self) -> None:
 		"""
 		Creates a websocket app\n
@@ -188,7 +190,7 @@ class TradovateClient:
 		"""
 		body = f"authorize\n1\n\n{self.ACCESS_TOKEN}"
 		self.WSAPP.send(body)
-		self.log("WS CONNECT","AUTHORIZED")
+		self.log("AUTHORIZED", "Tradovate account authenticated")
 		
 		# Starting heartbeat
 		self._start_heartbeat()
@@ -206,6 +208,7 @@ class TradovateClient:
 					# Subscribe to user sync
 					if response.get('i') and response['i'] == 1:
 						self._subscribe_user_sync()
+						self.log("SUBSCRIBED", "Account subscribed")
 
 					# To get notification of order
 					if response['d']['entityType'] == 'executionReport': 
@@ -218,7 +221,8 @@ class TradovateClient:
 
 							elif response['d']['entity']['ordStatus'] == 'Filled':
 								# NOTE ADD FILLED SNIPPET
-								pass
+								symbol = self.get_symbol_from_id[response['i']]
+								self.on_order_filled(symbol, response)
 
 							elif response['d']['entity']['ordStatus'] == 'Rejected':
 								# NOTE ADD REJECTED SNIPPET
@@ -279,6 +283,7 @@ class TradovateClient:
 		"""
 		self._can_disconnect = True
 		self.WSAPP.close()
+		os.remove(self.TOKEN_PATH)
 
 	# Public methods
 	def connect(self) -> None:
@@ -301,7 +306,14 @@ class TradovateClient:
 	def log(self, log_type:str, message:str) -> None:
 		"""
 		"""
-		...
+		print(log_type, message)
+
+	def get_symbol_from_id(self, request_id:int) -> str:
+		"""
+		"""
+		if request_id in self._id_vs_symbol:
+			return self._id_vs_symbol[request_id]
+		self.log("ERROR", f"{request_id} not found in the database")
 
 	def get_account_info(self) -> dict:
 		"""
@@ -321,15 +333,129 @@ class TradovateClient:
 		"""
 		return
 
-	def place_order(self, symbol:str, side:str, quantity:int, order_type:str="MARKET", price:float=...) -> int:
+	def place_order(
+			self, 
+			symbol:str, 
+			side:str, 
+			quantity:int, 
+			order_type:str="MARKET", 
+			price:float=...,
+			**options,
+		) -> None:
 		"""
+		Place order for options in broker server\n
+		Arguments:\n
+			symbol : str = symbol of the ticker\n
+			side : str = side of the order execution\n
+			quantity : int = quantity to trade\n
+			limitPrice : float = limit price to set limit order (only for limit order)\n
 		"""
-		...
+		command_id = options.get('command_id') or 5
+		body = {
+			"accountSpec": self.ACCOUNT_SPEC,
+			"accountId": self.ACCOUNT_ID,
+			"action": side.title(),
+			"symbol": symbol.upper(),
+			"orderQty": int(quantity),
+			"orderType": order_type.title(),
+			"isAutomated": True,
+		}
+		if options.get('expireTime'):
+			body['timeInForce'] = 'GTD'
+			body['expireTime'] = options['expireTime']
+		
+		if order_type.lower() == 'limit':
+			body['price']= price
+			
+		if order_type.lower() == 'stop':
+			body['stopPrice'] = price
+			del body['price']
 
-	def place_bracket_order(self, symbol:str, side:str, quantity:int, order_type:str="MARKET", price:float=..., stoploss:str=..., targetprofit:float=...) -> tuple[int, int, int]:
+		self.WSAPP.send(f"order/placeorder\n{command_id}\n\n{json.dumps(body)}")
+
+	def place_oco_order(
+			self,
+			symbol:str,
+			side:str,
+			quantity:int,
+			stoploss:float,
+			targetprofit:float,
+			**options
+		) -> None:
 		"""
+		Places an OCO (One Cancels Other) order in broker account\n
+		Arguments:\n
+			symbol 			: str 	= symbol of the ticker\n
+			side 			: str 	= side of the order execution\n
+			quantity 		: int 	= quantity to trade\n
+			stoploss 		: float = stoploss absolute price for the symbol\n
+			targetparget 	: float = profittarget absolute price for the symbol\n
+			"""
+		command_id = options.get('command_id') or 6
+		oco = {
+			"action":side.title(),
+			"orderType":"Limit",
+			"price":targetprofit
+		}
+
+		body = {
+			"accountSpec": self.ACCOUNT_SPEC,
+			"accountId": self.ACCOUNT_ID,
+			"action": side.title(),
+			"symbol": symbol.upper(),
+			"orderQty": quantity,
+			"orderType": "Stop",
+			"stopPrice":stoploss,
+			"isAutomated": True,
+			"other":oco
+		}
+		self.WSAPP.send(f"order/placeoco\n{command_id}\n\n{json.dumps(body)}")
+
+	def place_bracket_order(
+			self, 
+			symbol:str, 
+			side:str, 
+			quantity:int, 
+			order_type:str="MARKET", 
+			price:float=..., 
+			stoploss:str=..., 
+			targetprofit:float=...,
+			**options,
+		) -> None:
 		"""
-		...
+		Places strategy order via websocket\n
+		"""
+		command_id = options.get('command_id') or 7
+		params = {
+			"entryVersion":{
+				"orderQty":1,
+				"orderType":order_type.title()
+			},
+			"brackets":[
+				{
+					"qty":quantity,
+					"profitTarget":targetprofit * (1 if side == 'buy' else -1),
+					"stopLoss":stoploss * (-1 if side == 'buy' else 1),
+					"trailingStop":False
+				}
+			]
+		}
+		if order_type.upper() == "LIMIT":
+			params['entryVersion']['price'] = price
+			if options.get('expireTime'):
+				params['entryVersion']['timeInForce'] = 'GTD'
+				params['entryVersion']['expireTime'] = options['expireTime']
+		
+		body = {
+			"accountId":self.ACCOUNT_ID,
+			"accountSpec":self.ACCOUNT_SPEC,
+			"symbol":symbol,
+			"action":side.title(),
+			"orderStrategyTypeId":2,
+			"params":json.dumps(params)
+		}
+
+		self.WSAPP.send(f"orderstrategy/startorderstrategy\n{command_id}\n\n{json.dumps(body)}")
 
 	def query_order(self, order_id:int) -> dict:
 		"""
@@ -338,8 +464,14 @@ class TradovateClient:
 
 	def cancel_order(self, order_id:int) -> None:
 		"""
+		Cancel an open order via websocket\n
 		"""
-		...
+		command_id = 4
+		body = {
+			"orderId":order_id,
+			"isAutomated":True
+		}
+		self.WSAPP.send(f"order/cancelorder\n{command_id}\n\n{json.dumps(body)}")
 
 class TradovateWrapper:
 	
@@ -359,7 +491,7 @@ class TradovateWrapper:
 class TradovateWSAPP(TradovateAuth, TradovateClient, TradovateWrapper):
 
 	ID = "VT_TRADOVATE_API_WS"
-	AUTHOR = "Variance Technologies"
+	AUTHOR = "Variance Technologies pvt. ltd."
 	EXCHANGE = "SMART"
 	BROKER = "TRADOVATE"
 	MARKET = "FUTURES"
@@ -377,3 +509,4 @@ if __name__ == "__main__":
 		f.close()
 
 	api = TradovateWSAPP(creds=creds)
+	api.connect()
